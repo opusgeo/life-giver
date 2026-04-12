@@ -330,135 +330,163 @@ export function createFlightClouds(scene) {
   return { tick, dispose };
 }
 
-function buildCloud() {
-  const group = new THREE.Group();
-  const mat = new THREE.MeshToonMaterial({ color: 0xd6eeff, transparent: true, opacity: 0.5 });
-  [[0, 0, 0, 0.62], [-0.52, -0.1, 0, 0.42], [0.58, -0.1, 0, 0.46], [0.1, 0.32, 0, 0.38]].forEach(([x, y, z, r]) => {
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 6, 5), mat);
-    mesh.position.set(x, y, z);
-    group.add(mesh);
+// ─── Temalar ve Renkler ───────────────────────────────────────────────────────
+
+export const THEMES = {
+  MIDNIGHT: {
+    name: 'Midnight',
+    topColor: 0x020a17, // O sevilen koyu lacivert
+    bottomColor: 0x1a2a44, // Puslu ufuk
+    fogColor: 0x1a2a44,
+    moonVisible: true,
+    starsVisible: true,
+    cloudColor: 0x2b4162,
+    cloudOpacity: 0.3
+  },
+  MOONLIGHT: {
+    name: 'Moonlight',
+    topColor: 0x0a141e, // Gümüşi gece mavisi
+    bottomColor: 0x283c4b, // Aydınlık ufuk
+    fogColor: 0x283c4b,
+    moonVisible: true,
+    starsVisible: true,
+    cloudColor: 0xb4d2ff,
+    cloudOpacity: 0.35
+  },
+  DAYLIGHT: {
+    name: 'Daylight',
+    topColor: 0x0077be,
+    bottomColor: 0xcceeff,
+    fogColor: 0xcceeff,
+    moonVisible: false,
+    starsVisible: false,
+    cloudColor: 0xffffff,
+    cloudOpacity: 0.5
+  }
+};
+
+// ─── Wispy Bulut Sistemi ──────────────────────────────────────────────────────
+
+function buildWispyLayer(color) {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  grad.addColorStop(0.0, 'rgba(255,255,255,0.4)'); 
+  grad.addColorStop(1.0, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+
+  return new THREE.MeshBasicMaterial({
+    map: texture,
+    color: new THREE.Color(color),
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide
   });
+}
+
+function buildWispyCloud(color) {
+  const group = new THREE.Group();
+  const mat = buildWispyLayer(color);
+
+  for (let i = 0; i < 3; i++) {
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(28, 7), mat);
+    plane.position.set((Math.random()-0.5)*10, (Math.random()-0.5)*2, (Math.random()-0.5)*5);
+    plane.rotation.z = (Math.random()-0.5)*0.2;
+    plane.scale.set(1.5 + Math.random(), 0.5 + Math.random(), 1);
+    group.add(plane);
+  }
   return group;
 }
 
-// ─── Arka Plan Bulutları (Floating Island Hissi) ─────────────────────────────
-
 export function createBackgroundClouds(scene) {
   const group = new THREE.Group();
-  const count = 12;
   const clouds = [];
-
-  for (let i = 0; i < count; i++) {
-    const cloud = buildCloud();
-    const angle = (i / count) * Math.PI * 2;
-    const r = 25 + Math.random() * 10;
-    cloud.position.set(
-      Math.cos(angle) * r,
-      -3 + Math.random() * 4,
-      Math.sin(angle) * r
-    );
-    cloud.scale.setScalar(1.5 + Math.random() * 2);
-    cloud.rotation.y = Math.random() * Math.PI;
+  for (let i = 0; i < 6; i++) {
+    const cloud = buildWispyCloud(0xffffff);
+    const angle = (i / 6) * Math.PI * 2;
+    const r = 45 + Math.random() * 20;
+    cloud.position.set(Math.cos(angle)*r, 4 + Math.random()*8, Math.sin(angle)*r);
     group.add(cloud);
-    clouds.push({
-      mesh: cloud,
-      speed: 0.1 + Math.random() * 0.1,
-      offset: Math.random() * Math.PI * 2
-    });
+    clouds.push({ mesh: cloud, speed: 0.02 + Math.random()*0.03, offset: Math.random()*Math.PI*2 });
   }
   scene.add(group);
-
-  return (delta, elapsed) => {
-    clouds.forEach(c => {
-      c.mesh.position.y += Math.sin(elapsed * 0.5 + c.offset) * 0.005;
-      c.mesh.rotation.y += delta * c.speed * 0.2;
-    });
+  return {
+    group,
+    tick: (delta, elapsed) => {
+      clouds.forEach(c => {
+        c.mesh.position.y += Math.sin(elapsed * 0.2 + c.offset) * 0.005;
+        c.mesh.rotation.y += delta * c.speed;
+      });
+    },
+    updateColor: (color, opacity) => {
+      clouds.forEach(c => {
+        c.mesh.children.forEach(m => {
+          m.material.color.set(color);
+          m.material.opacity = opacity;
+        });
+      });
+    }
   };
 }
 
-// ─── Yıldız alanı ────────────────────────────────────────────────────────────
+// ─── Yıldızlar ───────────────────────────────────────────────────────────────
 
 export function createStarfield() {
-  const count = 2000;
+  const count = 3000;
   const positions = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
     const phi = Math.acos(2 * Math.random() - 1);
     const theta = Math.random() * Math.PI * 2;
-    const r = 80 + Math.random() * 25;
-    positions[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
-    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-    positions[i * 3 + 2] = r * Math.cos(phi);
+    const r = 85 + Math.random() * 10;
+    positions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i*3+2] = r * Math.cos(phi);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true, opacity: 0.8 });
+  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.12, transparent: true, opacity: 0.0 });
   return new THREE.Points(geo, mat);
 }
 
-// ─── Atmosferik Gökyüzü (Gradient) ───────────────────────────────────────────
+// ─── Atmosfer ────────────────────────────────────────────────────────────────
 
 export function createAtmosphere() {
   const geo = new THREE.SphereGeometry(95, 32, 32);
   const mat = new THREE.ShaderMaterial({
     uniforms: {
-      topColor:    { value: new THREE.Color(0x020a17) }, // Ana gece rengi
-      bottomColor: { value: new THREE.Color(0x1a2a44) }, // Daha belirgin ama loş gradyan altı
-      offset:      { value: 5 }, // Gradyanı vizöre yaklaştır
-      exponent:    { value: 0.3 } // Daha yumuşak dağılım
+      topColor:    { value: new THREE.Color(THEMES.MOONLIGHT.topColor) },
+      bottomColor: { value: new THREE.Color(THEMES.MOONLIGHT.bottomColor) },
+      offset:      { value: 12 },
+      exponent:    { value: 0.7 }
     },
-    vertexShader: `
-      varying vec3 vWorldPosition;
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldPosition = worldPosition.xyz;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 topColor;
-      uniform vec3 bottomColor;
-      uniform float offset;
-      uniform float exponent;
-      varying vec3 vWorldPosition;
-      void main() {
-        float h = normalize(vWorldPosition + offset).y;
-        gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
-      }
-    `,
+    vertexShader: `varying vec3 vWorldPos; void main() { vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform vec3 topColor; uniform vec3 bottomColor; uniform float offset; uniform float exponent; varying vec3 vWorldPos; void main() { float h = normalize(vWorldPos + offset).y; gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0); }`,
     side: THREE.BackSide
   });
-
-  return new THREE.Mesh(geo, mat);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.name = 'Atmosphere_Sky'; // Kolay bulmak için adlandırdık
+  return mesh;
 }
 
-// ─── Ay (Glow Effect ile) ────────────────────────────────────────────────────
+// ─── Ay & Güneş ──────────────────────────────────────────────────────────────
 
-export function createMoon(scene) {
+export function createMoon() {
   const group = new THREE.Group();
+  const moonGeo = new THREE.SphereGeometry(3, 32, 32);
+  const moonMat = new THREE.MeshBasicMaterial({ color: 0xe8eff5 });
+  group.add(new THREE.Mesh(moonGeo, moonMat));
 
-  // Ay Küresi
-  const moonGeo = new THREE.SphereGeometry(3.5, 32, 32);
-  const moonMat = new THREE.MeshBasicMaterial({ color: 0xffffee });
-  const moon = new THREE.Mesh(moonGeo, moonMat);
-  group.add(moon);
+  const glowGeo = new THREE.PlaneGeometry(45, 45);
+  const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.2, map: createGlowTexture(), blending: THREE.AdditiveBlending, depthWrite: false });
+  group.add(new THREE.Mesh(glowGeo, glowMat));
 
-  // Ay Halesi (Glow)
-  const glowGeo = new THREE.PlaneGeometry(15, 15);
-  const glowMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.15,
-    map: createGlowTexture(),
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide
-  });
-  const glow = new THREE.Mesh(glowGeo, glowMat);
-  group.add(glow);
-
-  group.position.set(-30, 18, -65);
-  scene.add(group);
-
+  group.position.set(-35, 15, -70);
+  group.visible = false;
   return group;
 }
 
@@ -467,12 +495,12 @@ function createGlowTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d');
-  const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
-  gradient.addColorStop(0, 'rgba(255,255,255,1)');
-  gradient.addColorStop(0.2, 'rgba(255,255,255,0.6)');
-  gradient.addColorStop(0.5, 'rgba(255,255,255,0.1)');
-  gradient.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = gradient;
+  const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.1)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
   return new THREE.CanvasTexture(canvas);
 }
+

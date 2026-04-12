@@ -5,9 +5,9 @@ import * as THREE from 'three';
  * Group'u hareket ettirerek tüm ada yüzer — raycasting etkilenmez.
  */
 export class Island {
-  constructor(dioramaFn, scene) {
+  constructor(scene, dioramaFn) { // main.js ile uyumlu sıra (scene, function)
     this.group = new THREE.Group();
-    this.objects = [];       // interactable mesh listesi
+    this.objects = [];       
     this.aliveCount = 0;
     this.floatPhase = Math.random() * Math.PI * 2;
     this._scene = scene;

@@ -29,14 +29,16 @@ document.body.appendChild(renderer.domElement);
 // ════════════════════════════════════════════════════════════════════════════
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x020a17);
-scene.fog = new THREE.FogExp2(0x1a2a44, 0.02); // Gradyanla uyumlu loş sis
+// Arka plan ve sis applyTheme tarafından yönetilecek
 
-// Atmosferik Gökyüzü, Bulutlar ve Yıldızlar
-scene.add(createAtmosphere());
-scene.add(createStarfield());
-const bgCloudsTick = createBackgroundClouds(scene);
-const moonGroup    = createMoon(scene);
+// Atmosferik Gökyüzü ve Temalar
+const atmosphere = createAtmosphere();
+scene.add(atmosphere);
+const stars = createStarfield();
+scene.add(stars);
+const bgCloudsCtrl = createBackgroundClouds(scene);
+const moonCtrl = createMoon();
+scene.add(moonCtrl);
 
 // ── Işıklar: Perfect Golden Hour ───────────────────────────────────────────
 // Gökyüzü ve yerin yumuşak etkileşimi için HemisphereLight
@@ -105,12 +107,6 @@ perspCamera.add(listener);
 orthoCamera.add(listener);
 
 const audioLoader = new THREE.AudioLoader();
-const backgroundSound = new THREE.Audio(listener);
-audioLoader.load('/bgm-kalimba.mp3', (buffer) => {
-  backgroundSound.setBuffer(buffer);
-  backgroundSound.setLoop(true);
-  backgroundSound.setVolume(0.5);
-});
 
 // Ambient: Kuş Sesleri (Dinamik)
 const ambientBirds = new THREE.Audio(listener);
@@ -156,11 +152,12 @@ function playKalimba() {
 
 let audioStarted = false;
 function startAudio() {
-  if (!audioStarted && backgroundSound.buffer && ambientBirds.buffer) {
-    backgroundSound.play();
-    ambientBirds.play();
-    audioStarted = true;
+  if (THREE.AudioContext.getContext().state === 'suspended') {
+    THREE.AudioContext.getContext().resume();
   }
+  // Sadece kuş seslerini başlat (BGM yok)
+  if (!ambientBirds.isPlaying) ambientBirds.play();
+  audioStarted = true;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -178,6 +175,52 @@ const blurSlider    = document.getElementById('blur-slider');
 const blurTop       = document.getElementById('tilt-shift-top');
 const blurBottom    = document.getElementById('tilt-shift-bottom');
 const cameraBtn     = document.getElementById('camera-toggle');
+const skyBtn        = document.getElementById('sky-toggle');
+
+import { THEMES } from './effects.js';
+let currentTheme = THEMES.MOONLIGHT;
+
+function applyTheme(theme) {
+  if (!theme) return;
+  currentTheme = theme;
+  
+  // Atmosfer shader güncelleme
+  if (atmosphere && atmosphere.material.uniforms) {
+    atmosphere.material.uniforms.topColor.value.set(theme.topColor);
+    atmosphere.material.uniforms.bottomColor.value.set(theme.bottomColor);
+  }
+  
+  // Sis ve Arka Plan
+  if (scene) {
+    scene.background.set(theme.topColor);
+    if (scene.fog) scene.fog.color.set(theme.fogColor);
+  }
+  
+  // Ay ve Yıldızlar
+  if (moonCtrl) moonCtrl.visible = theme.moonVisible;
+  if (stars && stars.material) {
+    stars.material.opacity = theme.starsVisible ? 0.8 : 0.2;
+  }
+  
+  // Bulut renkleri
+  if (bgCloudsCtrl && bgCloudsCtrl.updateColor) {
+    bgCloudsCtrl.updateColor(theme.cloudColor, theme.cloudOpacity);
+  }
+}
+
+// Başlangıç teması
+applyTheme(THEMES.MOONLIGHT);
+
+skyBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (currentTheme === THEMES.MOONLIGHT) {
+    applyTheme(THEMES.MIDNIGHT);
+    skyBtn.classList.remove('moonlight');
+  } else {
+    applyTheme(THEMES.MOONLIGHT);
+    skyBtn.classList.add('moonlight');
+  }
+});
 
 const toolsBar    = document.getElementById('tools-bar');
 
@@ -194,19 +237,9 @@ cameraBtn.addEventListener('click', () => {
   if (activeCamera === perspCamera) {
     activeCamera = orthoCamera;
     cameraBtn.classList.add('isometric');
-    // Ortho modunda ayı ve bulutları aşağı çek
-    if (moonGroup) {
-      moonGroup.position.set(-15, 6, -30);
-      moonGroup.scale.setScalar(0.5);
-    }
   } else {
     activeCamera = perspCamera;
     cameraBtn.classList.remove('isometric');
-    // Perspektif modunda ayı ve bulutları eski yerine al
-    if (moonGroup) {
-      moonGroup.position.set(-30, 18, -65);
-      moonGroup.scale.setScalar(1.0);
-    }
   }
   controls.object = activeCamera;
   controls.update();
@@ -281,9 +314,13 @@ function loadIsland(index) {
 
 // Modeller yüklendikten sonra ilk adayı başlat
 preloadModels(FARMHOUSE_FILES).then(() => {
+  console.log("Modeller yüklendi, ada başlatılıyor...");
   if (!currentIsland) {
     currentIsland = loadIsland(0);
+    applyTheme(currentTheme); // Temayı bir kez daha tazele
   }
+}).catch(err => {
+  console.error("Yükleme hatası:", err);
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -488,11 +525,11 @@ function animate() {
   nextIsland?.update(elapsed);
 
   // Arka plan bulutlarını oynat
-  bgCloudsTick(delta, elapsed);
+  bgCloudsCtrl?.tick(delta, elapsed);
 
   // Ay halesi her zaman kameraya bakmalı
-  if (moonGroup) {
-    moonGroup.children.forEach(child => {
+  if (moonCtrl) {
+    moonCtrl.children.forEach(child => {
       if (child.isMesh && child.geometry.type === 'PlaneGeometry') {
         child.lookAt(activeCamera.position);
       }
