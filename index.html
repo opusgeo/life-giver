@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Life-Giver</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #011627; overflow: hidden; }
+    canvas { display: block; }
+
+    /* ── Top HUD (Progress) ── */
+    #hud {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 18px;
+      pointer-events: none;
+      z-index: 200;
+    }
+    #island-label {
+      color: rgba(255,255,255,0.55);
+      font-family: 'Georgia', serif;
+      font-size: 12px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    #progress-bar-container {
+      background: rgba(255,255,255,0.12);
+      border-radius: 20px;
+      width: 200px;
+      height: 6px;
+      overflow: hidden;
+    }
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #a8edea, #fed6e3);
+      border-radius: 20px;
+      transition: width 0.5s ease;
+    }
+
+    /* ── Hint ── */
+    #hint {
+      position: fixed;
+      bottom: 95px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,0.3);
+      font-family: 'Georgia', serif;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      pointer-events: none;
+      transition: opacity 1.5s ease;
+      white-space: nowrap;
+      z-index: 100;
+    }
+
+    /* ── Tools Bar (Bottom Unified) ── */
+    #tools-bar {
+      position: fixed;
+      bottom: 25px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 10px 24px;
+      border-radius: 40px;
+      backdrop-filter: blur(15px);
+       -webkit-backdrop-filter: blur(15px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      z-index: 300;
+      pointer-events: auto;
+    }
+    .tool-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .divider {
+      width: 1px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.15);
+    }
+    .icon-btn {
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.6);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      font-family: 'Georgia', serif;
+      font-size: 11px;
+      letter-spacing: 1px;
+      transition: all 0.3s ease;
+      padding: 4px;
+      outline: none;
+    }
+    .icon-btn:hover { color: white; }
+    .icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
+
+    #blur-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 60px;
+      height: 3px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 5px;
+      outline: none;
+    }
+    #blur-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      background: white;
+      border-radius: 50%;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(255,255,255,0.3);
+    }
+
+    #next-btn {
+      background: rgba(255, 255, 255, 0.15);
+      border: none;
+      color: white;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-family: 'Georgia', serif;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    #next-btn:hover { background: rgba(255, 255, 255, 0.25); }
+
+    /* Conditional icons */
+    #camera-toggle.isometric .mode-persp { display: none; }
+    #camera-toggle:not(.isometric) .mode-iso { display: none; }
+    #sound-toggle.muted .speaker-on { display: none; }
+    #sound-toggle.muted .speaker-off { display: block; }
+    #sound-toggle:not(.muted) .speaker-off { display: none; }
+
+    /* ── Tilt-Shift Blur ── */
+    #tilt-shift-top, #tilt-shift-bottom {
+      position: fixed;
+      left: 0; right: 0;
+      height: 22vh;
+      pointer-events: none;
+      z-index: 5;
+      backdrop-filter: blur(var(--blur-amt, 6px));
+      -webkit-backdrop-filter: blur(var(--blur-amt, 6px));
+    }
+    #tilt-shift-top {
+      top: 0;
+      mask-image: linear-gradient(to bottom, black, transparent);
+      -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+    }
+    #tilt-shift-bottom {
+      bottom: 0;
+      mask-image: linear-gradient(to top, black, transparent);
+      -webkit-mask-image: linear-gradient(to top, black, transparent);
+    }
+
+    /* ── Messages ── */
+    #flight-msg, #completion-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 1s ease;
+      z-index: 400;
+    }
+    #flight-msg.show, #completion-overlay.show { opacity: 1; }
+    #flight-msg p, #completion-text {
+      color: white;
+      font-family: 'Georgia', serif;
+      font-size: 22px;
+      letter-spacing: 4px;
+      text-shadow: 0 0 20px rgba(168,237,234,0.6);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="hud">
+    <div id="island-label">✦ ORMAN KÖŞESİ 1/2</div>
+    <div id="progress-bar-container">
+      <div id="progress-bar"></div>
+    </div>
+  </div>
+
+  <p id="hint">click to bring life &nbsp;✦&nbsp; drag to explore</p>
+
+  <div id="flight-msg"><p>✦ &nbsp; travelling &nbsp; ✦</p></div>
+  <div id="completion-overlay"><p id="completion-text">✦ world awakened ✦</p></div>
+
+  <div id="tilt-shift-top"></div>
+  <div id="tilt-shift-bottom"></div>
+
+  <div id="tools-bar">
+    <button id="sound-toggle" class="icon-btn" title="Toggle Sound">
+      <svg class="speaker-on" viewBox="0 0 24 24"><path d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.85 14,18.71V20.77C18.03,19.86 21,16.28 21,12C21,7.72 18.03,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16.02C15.5,15.29 16.5,13.77 16.5,12M3,9V15H7L12,20V4L7,9H3Z" /></svg>
+      <svg class="speaker-off" viewBox="0 0 24 24"><path d="M12,4L9.91,6.09L12,8.18M4.27,3L3,4.27L7.73,9H3V15H7L12,20V13.27L16.25,17.53C15.58,18.04 14.83,18.43 14,18.7V20.77C15.38,20.45 16.63,19.82 17.68,18.96L19.73,21L21,19.73L12,10.73M19,12C19,12.94 18.8,13.82 18.46,14.64L19.97,16.15C20.62,14.91 21,13.5 21,12C21,7.72 18.03,4.14 14,3.23V5.29C16.89,6.15 19,8.83 19,12M16.5,12C16.5,10.23 15.5,8.71 14,7.97V10.18L16.45,12.63C16.48,12.43 16.5,12.22 16.5,12Z" /></svg>
+    </button>
+
+    <div class="divider"></div>
+
+    <div class="tool-group">
+      <span style="font-size: 8px; letter-spacing: 2px; color: rgba(255,255,255,0.4);">BLUR</span>
+      <input type="range" id="blur-slider" min="0" max="25" value="12">
+    </div>
+
+    <div class="divider"></div>
+
+    <button id="camera-toggle" class="icon-btn" title="Switch Camera">
+      <span class="mode-persp">📷 PERSP</span>
+      <span class="mode-iso">📐 ISO</span>
+    </button>
+
+    <div class="divider"></div>
+
+    <button id="next-btn">SKIP ✦</button>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

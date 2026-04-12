@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Life-Giver — Farmhouse Room</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1208; overflow: hidden; }
+    canvas { display: block; }
+
+    #hud {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 18px;
+      pointer-events: none;
+    }
+
+    #room-label {
+      color: rgba(255,240,200,0.6);
+      font-family: 'Georgia', serif;
+      font-size: 12px;
+      letter-spacing: 2px;
+    }
+
+    #progress-bar-container {
+      background: rgba(255,240,200,0.15);
+      border-radius: 20px;
+      width: 200px;
+      height: 7px;
+      overflow: hidden;
+    }
+
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #f6d365, #fda085);
+      border-radius: 20px;
+      transition: width 0.5s ease;
+    }
+
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #1a1208;
+      color: rgba(255,240,200,0.7);
+      font-family: 'Georgia', serif;
+      gap: 16px;
+      transition: opacity 0.8s ease;
+    }
+
+    #loading.hide { opacity: 0; pointer-events: none; }
+
+    #load-bar-wrap {
+      width: 180px;
+      height: 5px;
+      background: rgba(255,240,200,0.15);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    #load-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #f6d365, #fda085);
+      border-radius: 10px;
+      transition: width 0.3s ease;
+    }
+
+    #hint {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,240,200,0.35);
+      font-family: 'Georgia', serif;
+      font-size: 12px;
+      letter-spacing: 1.5px;
+      pointer-events: none;
+      transition: opacity 1.5s ease;
+      white-space: nowrap;
+    }
+
+    #completion-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 1s ease;
+    }
+    #completion-overlay.show { opacity: 1; }
+    #completion-text {
+      color: #fff8e7;
+      font-family: 'Georgia', serif;
+      font-size: 26px;
+      letter-spacing: 4px;
+      text-shadow: 0 0 30px rgba(253,160,133,0.9);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loading">
+    <p style="letter-spacing:3px; font-size:14px;">✦ loading room ✦</p>
+    <div id="load-bar-wrap"><div id="load-bar"></div></div>
+  </div>
+
+  <div id="hud">
+    <div id="room-label">✦ farmhouse room</div>
+    <div id="progress-bar-container">
+      <div id="progress-bar"></div>
+    </div>
+  </div>
+
+  <p id="hint">click to bring life &nbsp;✦&nbsp; drag to explore</p>
+  <div id="completion-overlay"><p id="completion-text">✦ room awakened ✦</p></div>
+
+  <script type="module" src="/src/room.js"></script>
+</body>
+</html>
