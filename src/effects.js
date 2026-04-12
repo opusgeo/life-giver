@@ -1,105 +1,137 @@
 import * as THREE from 'three';
 import { CLAY_COLOR } from './dioramas.js';
 
-// ─── Easing ──────────────────────────────────────────────────────────────────
+// ─── Yardımcı Fonksiyonlar ───
 
-function easeOutBack(t) {
-  const c1 = 1.70158, c3 = c1 + 1;
-  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+function createParticleTexture() {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.4, 'rgba(255,255,255,0.4)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
 }
+const particleTexture = createParticleTexture();
 
-export function easeInOutCubic(t) {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-// ─── Easing Yardımcıları ─────────────────────────────────────────────────────
-
-function easeOutCubic(x) {
-  return 1 - Math.pow(1 - x, 3);
-}
+// ─── animateBloom ───
 
 export function animateBloom(target, onComplete) {
-  target.userData.isAlive = true;
-
   const meshEntries = [];
   target.traverse(child => {
     if (!child.isMesh) return;
-    const hasColor = child.userData.targetColor !== undefined;
-    const hasOriginal = child.userData.originalMaterial !== undefined;
-    if (!hasColor && !hasOriginal) return;
+    const originalMat = child.userData.originalMaterial;
+    if (!originalMat) return;
 
-    const startColor = new THREE.Color(CLAY_COLOR);
-    const endColor = hasColor ? new THREE.Color(child.userData.targetColor) : null;
-    child.material = new THREE.MeshToonMaterial({ color: startColor.clone() });
-    
-    // Y pozisyonunu en alttaki noktaya göre normalize edip sakla (staggering için)
-    meshEntries.push({ 
-      child, 
-      startColor, 
-      endColor, 
-      y: child.position.y // Basit stagger için local y'yi kullanıyoruz
+    const cloneMat = (m) => {
+      const nm = m.clone();
+      nm.userData.uProgress = { value: 0 };
+      return nm;
+    };
+    const mats = Array.isArray(originalMat) ? originalMat.map(cloneMat) : cloneMat(originalMat);
+    const matArray = Array.isArray(mats) ? mats : [mats];
+
+    child.updateMatrixWorld(true);
+    child.geometry.computeBoundingBox();
+    const bbox = child.geometry.boundingBox;
+    const center = new THREE.Vector3();
+    bbox.getCenter(center);
+    child.localToWorld(center);
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+    const maxDist = size.length() * 0.6;
+
+    matArray.forEach(m => {
+      m.onBeforeCompile = (shader) => {
+        shader.uniforms.uProgress = m.userData.uProgress;
+        shader.uniforms.uClayColor = { value: new THREE.Color(CLAY_COLOR) };
+        shader.uniforms.uCenter = { value: center };
+        shader.uniforms.uMaxDist = { value: maxDist };
+        shader.uniforms.uShineColor = { value: new THREE.Color(0xffffff) };
+
+        shader.vertexShader = `varying vec3 vWP;\n` + shader.vertexShader.replace(
+          '#include <worldpos_vertex>',
+          '#include <worldpos_vertex>\nvWP = worldPosition.xyz;'
+        );
+
+        shader.fragmentShader = `
+          varying vec3 vWP;
+          uniform float uProgress;
+          uniform vec3 uCenter;
+          uniform float uMaxDist;
+          uniform vec3 uClayColor;
+          uniform vec3 uShineColor;
+        ` + shader.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          `
+          float dist = distance(vWP, uCenter) / (uMaxDist + 0.0001);
+          float radWave = sin(dist * 10.0 - uProgress * 4.0) * 0.03;
+          float h = dist + radWave;
+          float threshold = uProgress * 1.2 - 0.1;
+          float isP = smoothstep(threshold + 0.12, threshold, h);
+          float sh = smoothstep(threshold - 0.05, threshold, h) * (1.0 - step(threshold, h));
+          float lum = dot(gl_FragColor.rgb, vec3(0.333)); 
+          vec3 clayPure = uClayColor * clamp(lum * 1.5, 0.4, 1.2);
+          gl_FragColor.rgb = mix(clayPure, gl_FragColor.rgb, isP);
+          gl_FragColor.rgb += lum * sh * 0.1;
+          #include <dithering_fragment>
+          `
+        );
+      };
+      m.needsUpdate = true;
     });
+
+    child.material = mats;
+    meshEntries.push({ child, matArray, startY: child.position.y, worldY: center.y });
   });
 
-  // Mesh'leri Y koordinatına göre sırala (alttan üste boyanma hissi için)
-  meshEntries.sort((a, b) => a.y - b.y);
+  if (meshEntries.length === 0) {
+    onComplete?.();
+    return () => true;
+  }
 
-  const startScale = target.scale.clone();
-  let t = 0;
-  const dur = 0.7; // Daha hızlı ve tepkisel
+  meshEntries.sort((a, b) => a.worldY - b.worldY);
+  const duration = 480;
+  const stagger = 15;
+  let finishedCount = 0;
 
-  return (delta) => {
-    t = Math.min(t + delta / dur, 1);
-    
-    // ── Local Pivot Scale Pop ──
-    // Back-out benzeri bir büyüme efekti (0 -> 1.1 -> 1.0)
-    const scaleEase = t < 0.5 
-      ? Math.sin(t * Math.PI) * 1.2  // Hızlı büyüme
-      : 1 + Math.sin(t * Math.PI) * 0.1 * (1 - t); // Hafif overshoot ve oturma
-
-    // Not: Üstteki formül yerine basit bir lerp + sinus bazlı pop daha juicy olabilir
-    const s = Math.min(1.0, 1.2 * Math.pow(t, 0.4)); // Hızlı başlangıç
-    const pop = 1 + Math.sin(t * Math.PI) * 0.12 * (1 - t);
-    
-    target.scale.set(
-      startScale.x * pop,
-      startScale.y * pop,
-      startScale.z * pop
-    );
-
-    meshEntries.forEach((entry) => {
-      // Delay kaldırıldı, hepsi aynı anda başlar
-      if (entry.endColor) {
-        entry.child.material.color.lerpColors(entry.startColor, entry.endColor, ease);
-      }
-    });
-
-    if (t >= 1) {
-      target.scale.copy(startScale);
-      meshEntries.forEach(({ child, endColor }) => {
-        if (endColor) {
-          child.material.color.copy(endColor);
-        } else if (child.userData.originalMaterial) {
-          child.material.dispose();
-          child.material = child.userData.originalMaterial;
+  meshEntries.forEach((entry, i) => {
+    setTimeout(() => {
+      const { child, matArray, startY } = entry;
+      const startTime = Date.now();
+      function loop() {
+        const elapsed = Date.now() - startTime;
+        const t = Math.min(1, elapsed / duration);
+        const jump = Math.sin(t * Math.PI) * 0.07;
+        child.position.y = startY + jump;
+        matArray.forEach(m => { if(m.userData.uProgress) m.userData.uProgress.value = t; });
+        if (t < 1) requestAnimationFrame(loop);
+        else {
+          child.position.y = startY;
+          child.userData.isAlive = true;
+          finishedCount++;
+          if (finishedCount === meshEntries.length) setTimeout(() => onComplete?.(), 150);
         }
-      });
-      onComplete?.();
-      return true;
-    }
-    return false;
-  };
+      }
+      loop();
+    }, i * stagger);
+  });
+  return () => finishedCount === meshEntries.length;
 }
 
-// ─── Tıklama parıltısı ───────────────────────────────────────────────────────
+// ─── Diğer Efektler ───
 
 export function createSparkle(position, color, scene) {
   const count = 30;
   const positions = new Float32Array(count * 3);
   const velocities = Array.from({ length: count }, () => new THREE.Vector3(
-    (Math.random() - 0.5) * 4,
-    Math.random() * 4 + 0.5,
-    (Math.random() - 0.5) * 4
+    (Math.random() - 0.5) * 1.5,
+    Math.random() * 1.5 + 0.5,
+    (Math.random() - 0.5) * 1.5
   ));
   for (let i = 0; i < count; i++) {
     positions[i * 3] = position.x;
@@ -108,25 +140,19 @@ export function createSparkle(position, color, scene) {
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const mat = new THREE.PointsMaterial({
-    color: new THREE.Color(color),
-    size: 0.10,
-    transparent: true,
-    depthWrite: false,
-  });
+  const mat = new THREE.PointsMaterial({ color: new THREE.Color(color), size:0.12, map:particleTexture, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending });
   const pts = new THREE.Points(geo, mat);
   scene.add(pts);
   let t = 0;
-
   return (delta) => {
     t += delta;
-    const p = t / 1.2;
+    const p = t / 2.5;
     if (p >= 1) { scene.remove(pts); geo.dispose(); mat.dispose(); return true; }
     const arr = geo.attributes.position.array;
     for (let i = 0; i < count; i++) {
-      arr[i * 3]     += velocities[i].x * delta;
-      arr[i * 3 + 1] += (velocities[i].y - 6 * t) * delta;
-      arr[i * 3 + 2] += velocities[i].z * delta;
+      arr[i * 3] += (velocities[i].x + Math.sin(t * 4 + i) * 0.5) * delta;
+      arr[i * 3 + 1] += (velocities[i].y - 1.2 * t) * delta;
+      arr[i * 3 + 2] += (velocities[i].z + Math.cos(t * 4 + i) * 0.5) * delta;
     }
     geo.attributes.position.needsUpdate = true;
     mat.opacity = 1 - p;
@@ -134,7 +160,41 @@ export function createSparkle(position, color, scene) {
   };
 }
 
-// ─── Tamamlama parıltı yağmuru ───────────────────────────────────────────────
+export function createCozyDust(targetGroup, scene) {
+  const count = 35;
+  const positions = new Float32Array(count * 3);
+  const vels = [];
+  const bbox = new THREE.Box3().setFromObject(targetGroup);
+  const center = bbox.getCenter(new THREE.Vector3());
+  const size = bbox.getSize(new THREE.Vector3());
+  for (let i = 0; i < count; i++) {
+    positions[i * 3]     = center.x + (Math.random() - 0.5) * size.x * 1.2;
+    positions[i * 3 + 1] = bbox.min.y + Math.random() * 0.5;
+    positions[i * 3 + 2] = center.z + (Math.random() - 0.5) * size.z * 1.2;
+    vels.push({ x: (Math.random()-0.5)*0.5, y: Math.random()*1.2+0.6, z: (Math.random()-0.5)*0.5, phase: Math.random()*Math.PI*2 });
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({ color: 0xfff3cd, size: 0.16, map: particleTexture, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+  const pts = new THREE.Points(geo, mat);
+  scene.add(pts);
+  let t = 0;
+  return (delta) => {
+    t += delta;
+    const p = t / 2.4;
+    if (p >= 1) { scene.remove(pts); geo.dispose(); mat.dispose(); return true; }
+    const arr = geo.attributes.position.array;
+    for (let i = 0; i < count; i++) {
+      const v = vels[i];
+      arr[i * 3] += (v.x + Math.sin(t * 5 + v.phase) * 0.2) * delta;
+      arr[i * 3 + 1] += v.y * delta;
+      arr[i * 3 + 2] += (v.z + Math.cos(t * 5 + v.phase) * 0.2) * delta;
+    }
+    geo.attributes.position.needsUpdate = true;
+    mat.opacity = Math.sin(p * Math.PI) * 0.9; 
+    return false;
+  };
+}
 
 export function createCompletionRain(scene) {
   const count = 200;
@@ -142,138 +202,92 @@ export function createCompletionRain(scene) {
   const colorArr  = new Float32Array(count * 3);
   const vels = [];
   const palette = [0xa8edea, 0xfed6e3, 0xffd700, 0x81ecec, 0xff6b9d].map(h => new THREE.Color(h));
-
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
     const r = Math.random() * 4;
-    positions[i * 3]     = Math.cos(angle) * r;
+    positions[i * 3] = Math.cos(angle) * r;
     positions[i * 3 + 1] = Math.random() * 3;
     positions[i * 3 + 2] = Math.sin(angle) * r;
-    vels.push(new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 2 + 0.5, (Math.random() - 0.5) * 0.5));
+    vels.push(new THREE.Vector3((Math.random()-0.5)*0.5, Math.random()*2+0.5, (Math.random()-0.5)*0.5));
     const c = palette[i % palette.length];
     colorArr[i * 3] = c.r; colorArr[i * 3 + 1] = c.g; colorArr[i * 3 + 2] = c.b;
   }
-
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute('color',    new THREE.BufferAttribute(colorArr, 3));
-  const mat = new THREE.PointsMaterial({ size: 0.14, vertexColors: true, transparent: true, depthWrite: false });
+  geo.setAttribute('color', new THREE.BufferAttribute(colorArr, 3));
+  const mat = new THREE.PointsMaterial({ size:0.14, vertexColors:true, transparent:true, depthWrite:false });
   const pts = new THREE.Points(geo, mat);
   scene.add(pts);
   let t = 0;
-
   return (delta) => {
     t += delta;
     const p = t / 3.8;
     if (p >= 1) { scene.remove(pts); geo.dispose(); mat.dispose(); return true; }
     const arr = geo.attributes.position.array;
     for (let i = 0; i < count; i++) {
-      arr[i * 3]     += vels[i].x * delta;
+      arr[i * 3] += vels[i].x * delta;
       arr[i * 3 + 1] += vels[i].y * delta;
       arr[i * 3 + 2] += vels[i].z * delta;
     }
     geo.attributes.position.needsUpdate = true;
-    mat.opacity = p < 0.5 ? 1 : 1 - (p - 0.5) / 0.5;
+    mat.opacity = p < 0.5 ? 1 : 1 - (p-0.5)/0.5;
     return false;
   };
 }
 
-// ─── Shapeshift: objeler eriyip ruh doğar ───────────────────────────────────
-
 export function createShapeshiftEffect(island, scene) {
-  const objects   = island.objects;
+  const objects = island.objects;
   const islandPos = island.worldCenter();
-
-  // Toz bulutu
   const dustCount = 130;
-  const dustPos   = new Float32Array(dustCount * 3);
-  const dustVel   = [];
+  const dustPos = new Float32Array(dustCount * 3);
+  const dustVel = [];
   for (let i = 0; i < dustCount; i++) {
-    dustPos[i * 3]     = islandPos.x + (Math.random() - 0.5) * 5;
-    dustPos[i * 3 + 1] = islandPos.y + Math.random() * 2.5;
-    dustPos[i * 3 + 2] = islandPos.z + (Math.random() - 0.5) * 5;
-    dustVel.push(new THREE.Vector3(
-      (Math.random() - 0.5) * 2, Math.random() * 2.5 + 0.5, (Math.random() - 0.5) * 2
-    ));
+    dustPos[i * 3] = islandPos.x + (Math.random()-0.5)*5;
+    dustPos[i * 3 + 1] = islandPos.y + Math.random()*2.5;
+    dustPos[i * 3 + 2] = islandPos.z + (Math.random()-0.5)*5;
+    dustVel.push(new THREE.Vector3((Math.random()-0.5)*2, Math.random()*2.5+0.5, (Math.random()-0.5)*2));
   }
   const dustGeo = new THREE.BufferGeometry();
   dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
   const dustMat = new THREE.PointsMaterial({ color: 0xcccccc, size: 0.10, transparent: true, depthWrite: false });
   const dust = new THREE.Points(dustGeo, dustMat);
   scene.add(dust);
-
-  // Ruh kristali
   const spirit = buildSpirit();
   spirit.position.copy(islandPos);
   spirit.scale.setScalar(0);
   scene.add(spirit);
-
   const startScales = objects.map(o => o.scale.clone());
   let t = 0;
-  const phase1 = 0.9, phase2 = 1.7;
-
-  function tick(delta) {
-    t += delta;
-
-    // Faz 1: gruplar küçülür
-    if (t < phase1) {
-      const p = easeInOutCubic(t / phase1);
-      objects.forEach((o, i) => {
-        const s = 1 - p;
-        o.scale.set(startScales[i].x * s, startScales[i].y * s, startScales[i].z * s);
-      });
-    }
-
-    // Faz 2: ruh açılır
-    if (t >= phase1 && t < phase2) {
-      objects.forEach(o => { o.visible = false; });
-      const p = easeOutBack(Math.min((t - phase1) / (phase2 - phase1), 1));
-      spirit.scale.setScalar(Math.max(0, p) * 1.3);
-    }
-
-    // Toz hareketi
-    const dArr = dustGeo.attributes.position.array;
-    for (let i = 0; i < dustCount; i++) {
-      dArr[i * 3]     += dustVel[i].x * delta;
-      dArr[i * 3 + 1] += dustVel[i].y * delta;
-      dArr[i * 3 + 2] += dustVel[i].z * delta;
-    }
-    dustGeo.attributes.position.needsUpdate = true;
-    dustMat.opacity = Math.max(0, 1 - t / 1.5);
-
-    // Ruh animasyonu
-    if (t >= phase1) {
-      spirit.position.y = islandPos.y + 1.8 + Math.sin(t * 4) * 0.1;
-      spirit.rotation.y += delta * 1.3;
-      spirit.children.forEach((wing, i) => {
-        if (wing.geometry?.type === 'ConeGeometry') {
-          wing.rotation.z = (i === 0 ? 1 : -1) * (Math.PI / 2 + Math.sin(t * 6) * 0.45);
-        }
-      });
-    }
-
-    if (t >= phase2) {
-      scene.remove(dust);
-      dustGeo.dispose(); dustMat.dispose();
-      return true;
-    }
-    return false;
-  }
-
-  return { tick, spirit };
+  return {
+    tick: (delta) => {
+      t += delta;
+      if (t < 0.9) {
+        const p = 1 - (t / 0.9);
+        objects.forEach((o, i) => o.scale.set(startScales[i].x*p, startScales[i].y*p, startScales[i].z*p));
+      }
+      if (t >= 0.9 && t < 1.7) {
+        objects.forEach(o => o.visible = false);
+        const p = Math.min((t - 0.9) / 0.8, 1);
+        spirit.scale.setScalar(p * 1.3);
+      }
+      const dArr = dustGeo.attributes.position.array;
+      for (let i = 0; i < dustCount; i++) {
+        dArr[i * 3] += dustVel[i].x * delta;
+        dArr[i * 3 + 1] += dustVel[i].y * delta;
+        dArr[i * 3+2] += dustVel[i].z * delta;
+      }
+      dustGeo.attributes.position.needsUpdate = true;
+      dustMat.opacity = Math.max(0, 1 - t / 1.5);
+      return t >= 1.7;
+    },
+    spirit
+  };
 }
 
-// ─── Spirit (ruh kristali) ───────────────────────────────────────────────────
-
-export function buildSpirit() {
+function buildSpirit() {
   const group = new THREE.Group();
-
-  const body = new THREE.Mesh(
-    new THREE.SphereGeometry(0.23, 10, 8),
-    new THREE.MeshToonMaterial({ color: 0xffffff, emissive: new THREE.Color(0x90caf9), emissiveIntensity: 0.9 })
-  );
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.23, 10, 8), new THREE.MeshToonMaterial({ color: 0xffffff, emissive: new THREE.Color(0x90caf9), emissiveIntensity: 0.9 }));
   group.add(body);
-
   const wingMat = new THREE.MeshToonMaterial({ color: 0xb3e5fc, transparent: true, opacity: 0.85 });
   [-1, 1].forEach(side => {
     const wing = new THREE.Mesh(new THREE.ConeGeometry(0.48, 0.18, 4), wingMat);
@@ -281,198 +295,105 @@ export function buildSpirit() {
     wing.position.x = side * 0.46;
     group.add(wing);
   });
-
-  const tail = new THREE.Mesh(
-    new THREE.ConeGeometry(0.10, 0.42, 4),
-    new THREE.MeshToonMaterial({ color: 0xe1f5fe, emissive: new THREE.Color(0x29b6f6), emissiveIntensity: 0.6 })
-  );
-  tail.position.y = -0.37;
-  tail.rotation.x = Math.PI;
-  group.add(tail);
-
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.42, 4), new THREE.MeshToonMaterial({ color: 0xe1f5fe, emissive: new THREE.Color(0x29b6f6), emissiveIntensity: 0.6 }));
+  tail.position.y = -0.37; tail.rotation.x = Math.PI; group.add(tail);
   return group;
 }
 
-// ─── Uçuş bulutları ──────────────────────────────────────────────────────────
-
 export function createFlightClouds(scene) {
   const clouds = [];
-  const speeds = [];
-
+  const speeds = []; 
   for (let i = 0; i < 22; i++) {
     const cloud = buildCloud();
-    cloud.position.set(
-      (Math.random() - 0.5) * 26,
-      (Math.random() - 0.5) * 7 + 2,
-      -Math.random() * 85 - 5
-    );
-    cloud.scale.setScalar(0.4 + Math.random() * 0.7);
-    scene.add(cloud);
-    clouds.push(cloud);
-    speeds.push(7 + Math.random() * 5);
+    cloud.position.set((Math.random()-0.5)*26, (Math.random()-0.5)*7+2, -Math.random()*85-5);
+    cloud.scale.setScalar(0.4+Math.random()*0.7);
+    scene.add(cloud); clouds.push(cloud); speeds.push(7+Math.random()*5);
   }
-
-  function tick(delta) {
-    clouds.forEach((cloud, i) => {
-      cloud.position.z += speeds[i] * delta;
-      if (cloud.position.z > 8) cloud.position.z = -85;
-    });
-    return false;
-  }
-
-  function dispose() {
-    clouds.forEach(c => {
-      scene.remove(c);
-      c.children.forEach(ch => { ch.geometry?.dispose(); ch.material?.dispose(); });
-    });
-  }
-
-  return { tick, dispose };
+  return { 
+    tick: (delta, cam) => { 
+      clouds.forEach((c,i)=>{
+        c.position.z+=speeds[i]*delta; 
+        if(c.position.z>8)c.position.z=-85;
+        if(cam) c.lookAt(cam.position);
+      }); return false; 
+    },
+    dispose: () => { clouds.forEach(c=>scene.remove(c)); }
+  };
 }
 
 function buildCloud() {
   const group = new THREE.Group();
   const mat = new THREE.MeshToonMaterial({ color: 0xd6eeff, transparent: true, opacity: 0.5 });
-  [[0, 0, 0, 0.62], [-0.52, -0.1, 0, 0.42], [0.58, -0.1, 0, 0.46], [0.1, 0.32, 0, 0.38]].forEach(([x, y, z, r]) => {
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 6, 5), mat);
-    mesh.position.set(x, y, z);
-    group.add(mesh);
+  [[0,0,0,0.62],[-0.52,-0.1,0,0.42],[0.58,-0.1,0,0.46],[0.1,0.32,0,0.38]].forEach(([x,y,z,r])=>{
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(r,6,5), mat);
+    mesh.position.set(x,y,z); group.add(mesh);
   });
   return group;
 }
 
-// ─── Arka Plan Bulutları (Floating Island Hissi) ─────────────────────────────
-
 export function createBackgroundClouds(scene) {
-  const group = new THREE.Group();
-  const count = 12;
   const clouds = [];
-
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < 12; i++) {
     const cloud = buildCloud();
-    const angle = (i / count) * Math.PI * 2;
-    const r = 25 + Math.random() * 10;
-    cloud.position.set(
-      Math.cos(angle) * r,
-      -3 + Math.random() * 4,
-      Math.sin(angle) * r
-    );
-    cloud.scale.setScalar(1.5 + Math.random() * 2);
-    cloud.rotation.y = Math.random() * Math.PI;
-    group.add(cloud);
-    clouds.push({
-      mesh: cloud,
-      speed: 0.1 + Math.random() * 0.1,
-      offset: Math.random() * Math.PI * 2
-    });
+    const angle = (i/12)*Math.PI*2; const r = 25+Math.random()*10;
+    cloud.position.set(Math.cos(angle)*r, -3+Math.random()*4, Math.sin(angle)*r);
+    cloud.scale.setScalar(1.5+Math.random()*2);
+    scene.add(cloud); clouds.push({mesh:cloud, speed:0.1+Math.random()*0.1, offset:Math.random()*Math.PI*2});
   }
-  scene.add(group);
-
-  return (delta, elapsed) => {
-    clouds.forEach(c => {
-      c.mesh.position.y += Math.sin(elapsed * 0.5 + c.offset) * 0.005;
-      c.mesh.rotation.y += delta * c.speed * 0.2;
-    });
+  return (delta, elapsed, cam) => { 
+    clouds.forEach(c=>{
+      c.mesh.position.y+=Math.sin(elapsed*0.5+c.offset)*0.005; 
+      if(cam) c.mesh.lookAt(cam.position);
+    }); 
   };
 }
 
-// ─── Yıldız alanı ────────────────────────────────────────────────────────────
-
-export function createStarfield() {
-  const count = 2000;
-  const positions = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) {
-    const phi = Math.acos(2 * Math.random() - 1);
-    const theta = Math.random() * Math.PI * 2;
-    const r = 80 + Math.random() * 25;
-    positions[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
-    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-    positions[i * 3 + 2] = r * Math.cos(phi);
+export function createStardust() {
+  const group = new THREE.Group();
+  const count = 800;
+  const pos = new Float32Array(count*3);
+  for (let i=0; i<count; i++) {
+    const phi=Math.acos(2*Math.random()-1), theta=Math.random()*Math.PI*2, r=90+Math.random()*20;
+    pos[i*3]=r*Math.sin(phi)*Math.cos(theta); pos[i*3+1]=r*Math.sin(phi)*Math.sin(theta); pos[i*3+2]=r*Math.cos(phi);
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true, opacity: 0.8 });
-  return new THREE.Points(geo, mat);
+  const geo=new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  group.add(new THREE.Points(geo, new THREE.PointsMaterial({size:0.12, color:0xffffff, transparent:true, opacity:0.6})));
+  return { mesh: group, tick: (el) => { group.rotation.y=el*0.02; } };
 }
-
-// ─── Atmosferik Gökyüzü (Gradient) ───────────────────────────────────────────
 
 export function createAtmosphere() {
   const geo = new THREE.SphereGeometry(95, 32, 32);
   const mat = new THREE.ShaderMaterial({
-    uniforms: {
-      topColor:    { value: new THREE.Color(0x001d3d) }, 
-      bottomColor: { value: new THREE.Color(0x90e0ef) }, 
-      offset:      { value: 15 }, // Ortho için daha düşük offset
-      exponent:    { value: 0.5 } 
-    },
-    vertexShader: `
-      varying vec3 vWorldPosition;
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldPosition = worldPosition.xyz;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 topColor;
-      uniform vec3 bottomColor;
-      uniform float offset;
-      uniform float exponent;
-      varying vec3 vWorldPosition;
-      void main() {
-        float h = normalize(vWorldPosition + offset).y;
-        gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
-      }
-    `,
+    uniforms: { topColor: {value:new THREE.Color(0x001d3d)}, bottomColor: {value:new THREE.Color(0x90e0ef)}, offset: {value:15}, exponent: {value:0.5} },
+    vertexShader: `varying vec3 vWorldPosition; void main() { vWorldPosition=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: `uniform vec3 topColor, bottomColor; uniform float offset, exponent; varying vec3 vWorldPosition; void main() { float h=normalize(vWorldPosition+offset).y; gl_FragColor=vec4(mix(bottomColor, topColor, max(pow(max(h,0.0), exponent), 0.0)), 1.0); }`,
     side: THREE.BackSide
   });
-
   return new THREE.Mesh(geo, mat);
 }
 
-// ─── Ay (Glow Effect ile) ────────────────────────────────────────────────────
-
 export function createMoon(scene) {
   const group = new THREE.Group();
+  group.name = 'CelestialGroup';
 
-  // Ay Küresi
-  const moonGeo = new THREE.SphereGeometry(3.5, 32, 32);
-  const moonMat = new THREE.MeshBasicMaterial({ color: 0xffffee });
-  const moon = new THREE.Mesh(moonGeo, moonMat);
+  // 1. AY (Night Visual)
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(8.0,32,32), new THREE.MeshBasicMaterial({color:0xfff9e6, fog: false}));
+  moon.name = 'VisualMoon';
   group.add(moon);
+  
+  // 2. GÜNEŞ (Morning Visual)
+  const sunMesh = new THREE.Mesh(new THREE.SphereGeometry(8.0,32,32), new THREE.MeshBasicMaterial({color:0xffcc33, fog: false}));
+  sunMesh.name = 'VisualSun';
+  sunMesh.visible = false; // Gündüz modunda açılacak
+  group.add(sunMesh);
 
-  // Ay Halesi (Glow)
-  const glowGeo = new THREE.PlaneGeometry(15, 15);
-  const glowMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.15,
-    map: createGlowTexture(),
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide
-  });
+  const glowGeo = new THREE.PlaneGeometry(60, 60);
+  const glowMat = new THREE.MeshBasicMaterial({ color: 0xfff9e6, transparent: true, opacity: 0.3, map: particleTexture, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
   const glow = new THREE.Mesh(glowGeo, glowMat);
+  glow.name = 'CelestialGlow';
   group.add(glow);
 
-  group.position.set(-30, 18, -65);
+  group.position.set(-30, 12, -60); // Ay aşağı indirildi ve küçültüldü
   scene.add(group);
-
   return group;
-}
-
-function createGlowTexture() {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
-  gradient.addColorStop(0, 'rgba(255,255,255,1)');
-  gradient.addColorStop(0.2, 'rgba(255,255,255,0.6)');
-  gradient.addColorStop(0.5, 'rgba(255,255,255,0.1)');
-  gradient.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
-  return new THREE.CanvasTexture(canvas);
 }

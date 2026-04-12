@@ -11,6 +11,9 @@ export class Island {
     this.aliveCount = 0;
     this.floatPhase = Math.random() * Math.PI * 2;
     this._scene = scene;
+    
+    // Adanın ana (base) koordinatı
+    this.baseY = 0;
 
     this.objects = dioramaFn(this.group);
     this.totalInteractable = this.objects.filter(o => o.userData.interactable).length;
@@ -24,7 +27,13 @@ export class Island {
 
   /** elapsed: THREE.Clock.elapsedTime */
   update(elapsed) {
-    this.group.position.y = Math.sin(elapsed * 0.38 + this.floatPhase) * 0.2;
+    // 1. Pürüzsüz Yukarı-Aşağı Salınım
+    const floatY = Math.sin(elapsed * 0.3 + this.floatPhase) * 0.15;
+    this.group.position.y = this.baseY + floatY;
+
+    // 2. Hafif Yalpalama (Rocking) - Daha "smooth" bir his için
+    this.group.rotation.x = Math.sin(elapsed * 0.2 + this.floatPhase) * 0.015;
+    this.group.rotation.z = Math.cos(elapsed * 0.25 + this.floatPhase) * 0.012;
   }
 
   /** Dünya koordinatlarında ada merkezi */
@@ -36,6 +45,7 @@ export class Island {
 
   setPosition(x, y, z) {
     this.group.position.set(x, y, z);
+    this.baseY = y; // Ana pozisyonu da güncelle
   }
 
   dispose() {
