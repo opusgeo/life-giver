@@ -34,6 +34,9 @@ export class Island {
     // 2. Hafif Yalpalama (Rocking) - Daha "smooth" bir his için
     this.group.rotation.x = Math.sin(elapsed * 0.2 + this.floatPhase) * 0.015;
     this.group.rotation.z = Math.cos(elapsed * 0.25 + this.floatPhase) * 0.012;
+
+    // 3. Su / Buz yüzey animasyonu (varsa)
+    this.group.userData.waterTick?.(elapsed);
   }
 
   /** Dünya koordinatlarında ada merkezi */

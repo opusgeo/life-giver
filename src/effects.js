@@ -18,6 +18,36 @@ function createParticleTexture() {
 }
 const particleTexture = createParticleTexture();
 
+// ─── Procedural Particle Shader ───
+const proceduralShader = {
+  uniforms: {
+    uMap: { value: particleTexture }
+  },
+  vertexShader: `
+    attribute float sizeScale;
+    attribute vec3 color;
+    attribute float opacity;
+    varying vec3 vColor;
+    varying float vOpacity;
+    void main() {
+      vColor = color;
+      vOpacity = opacity;
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = (1.2 * sizeScale) * (300.0 / -mvPosition.z);
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D uMap;
+    varying vec3 vColor;
+    varying float vOpacity;
+    void main() {
+      vec4 tex = texture2D(uMap, gl_PointCoord);
+      gl_FragColor = vec4(tex.rgb * vColor * 0.6, tex.a * vOpacity);
+    }
+  `
+};
+
 // ─── animateBloom ───
 
 export function animateBloom(target, onComplete) {
@@ -128,70 +158,122 @@ export function animateBloom(target, onComplete) {
 export function createSparkle(position, color, scene) {
   const count = 30;
   const positions = new Float32Array(count * 3);
+  const sizeScales = new Float32Array(count);
+  const colors = new Float32Array(count * 3);
+  const opacities = new Float32Array(count);
+
   const velocities = Array.from({ length: count }, () => new THREE.Vector3(
-    (Math.random() - 0.5) * 1.5,
-    Math.random() * 1.5 + 0.5,
-    (Math.random() - 0.5) * 1.5
+    (Math.random() - 0.5) * 2.0,
+    Math.random() * 2.0 + 0.3, 
+    (Math.random() - 0.5) * 2.0
   ));
+
+  const baseCol = new THREE.Color(color);
+
   for (let i = 0; i < count; i++) {
     positions[i * 3] = position.x;
     positions[i * 3 + 1] = position.y;
     positions[i * 3 + 2] = position.z;
+    sizeScales[i] = 0.5 + Math.random() * 1.5;
+    colors[i * 3] = baseCol.r; colors[i * 3 + 1] = baseCol.g; colors[i * 3 + 2] = baseCol.b;
+    opacities[i] = 1.0;
   }
+
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const mat = new THREE.PointsMaterial({ color: new THREE.Color(color), size:0.12, map:particleTexture, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending });
+  geo.setAttribute('sizeScale', new THREE.BufferAttribute(sizeScales, 1));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('opacity', new THREE.BufferAttribute(opacities, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    ...proceduralShader,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+  });
+
   const pts = new THREE.Points(geo, mat);
   scene.add(pts);
+
   let t = 0;
   return (delta) => {
     t += delta;
-    const p = t / 2.5;
+    const p = t / 1.5;
     if (p >= 1) { scene.remove(pts); geo.dispose(); mat.dispose(); return true; }
     const arr = geo.attributes.position.array;
+    const opp = geo.attributes.opacity.array;
     for (let i = 0; i < count; i++) {
-      arr[i * 3] += (velocities[i].x + Math.sin(t * 4 + i) * 0.5) * delta;
+      arr[i * 3]     += (velocities[i].x) * delta;
       arr[i * 3 + 1] += (velocities[i].y - 1.2 * t) * delta;
-      arr[i * 3 + 2] += (velocities[i].z + Math.cos(t * 4 + i) * 0.5) * delta;
+      arr[i * 3 + 2]     += (velocities[i].z) * delta;
+      opp[i] = 1.0 - p;
     }
     geo.attributes.position.needsUpdate = true;
-    mat.opacity = 1 - p;
+    geo.attributes.opacity.needsUpdate = true;
     return false;
   };
 }
 
 export function createCozyDust(targetGroup, scene) {
-  const count = 35;
+  const count = 10;
   const positions = new Float32Array(count * 3);
+  const sizeScales = new Float32Array(count);
+  const colors = new Float32Array(count * 3);
+  const opacities = new Float32Array(count);
   const vels = [];
+
   const bbox = new THREE.Box3().setFromObject(targetGroup);
   const center = bbox.getCenter(new THREE.Vector3());
   const size = bbox.getSize(new THREE.Vector3());
+  const baseCol = new THREE.Color(0xfff3cd);
+
   for (let i = 0; i < count; i++) {
     positions[i * 3]     = center.x + (Math.random() - 0.5) * size.x * 1.2;
     positions[i * 3 + 1] = bbox.min.y + Math.random() * 0.5;
     positions[i * 3 + 2] = center.z + (Math.random() - 0.5) * size.z * 1.2;
-    vels.push({ x: (Math.random()-0.5)*0.5, y: Math.random()*1.2+0.6, z: (Math.random()-0.5)*0.5, phase: Math.random()*Math.PI*2 });
+    
+    sizeScales[i] = 0.5 + Math.random() * 1.8;
+    colors[i * 3] = baseCol.r; colors[i * 3 + 1] = baseCol.g; colors[i * 3 + 2] = baseCol.b;
+    opacities[i] = 0.0;
+
+    vels.push({ 
+      x: (Math.random()-0.5)*0.5, 
+      y: Math.random()*1.2+0.8, 
+      z: (Math.random()-0.5)*0.5, 
+      phase: Math.random()*Math.PI*2 
+    });
   }
+
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const mat = new THREE.PointsMaterial({ color: 0xfff3cd, size: 0.16, map: particleTexture, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+  geo.setAttribute('sizeScale', new THREE.BufferAttribute(sizeScales, 1));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('opacity', new THREE.BufferAttribute(opacities, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    ...proceduralShader,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+  });
+
   const pts = new THREE.Points(geo, mat);
   scene.add(pts);
+
   let t = 0;
   return (delta) => {
     t += delta;
-    const p = t / 2.4;
+    const p = t / 2.2;
     if (p >= 1) { scene.remove(pts); geo.dispose(); mat.dispose(); return true; }
+    
     const arr = geo.attributes.position.array;
+    const opp = geo.attributes.opacity.array;
+    
     for (let i = 0; i < count; i++) {
       const v = vels[i];
-      arr[i * 3] += (v.x + Math.sin(t * 5 + v.phase) * 0.2) * delta;
+      arr[i * 3]     += (v.x + Math.sin(t * 5 + v.phase) * 0.2) * delta;
       arr[i * 3 + 1] += v.y * delta;
       arr[i * 3 + 2] += (v.z + Math.cos(t * 5 + v.phase) * 0.2) * delta;
+      opp[i] = Math.sin(p * Math.PI) * 0.9;
     }
     geo.attributes.position.needsUpdate = true;
-    mat.opacity = Math.sin(p * Math.PI) * 0.9; 
+    geo.attributes.opacity.needsUpdate = true;
     return false;
   };
 }

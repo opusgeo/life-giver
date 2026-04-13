@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getModel } from './glbCache.js';
+import { createWater, createIce } from './water.js';
 
 // ─── Materyal ────────────────────────────────────────────────────────────────
 // Clay: Bej/açık taş tonu — Gündüz modunda turuncu görünmemesi için nötrleştirildi
@@ -105,9 +106,16 @@ export function buildForestIsland(islandGroup) {
   buildBase(islandGroup, objects, 0x4caf50); 
 
   const pond = makeObj(islandGroup, objects);
-  m(pond, G.cyl(1.1, 1.1, 0.08, 18),   0x448aff, 0.2, 0.05, -0.2); 
+  // shallow stone rim (clay, participates in bloom animation)
+  m(pond, G.cyl(1.15, 1.15, 0.08, 24), 0x448aff, 0.2, 0.02, -0.2);
   m(pond, G.cyl(0.2, 0.2, 0.04, 8),    0x2e7d32, -0.2, 0.1, -0.3);
   m(pond, G.cyl(0.15, 0.15, 0.04, 8),  0x2e7d32, 0.4, 0.11, 0.1);
+  // animated water surface (always visible, not clay)
+  const _pondWater = createWater(1.05);
+  _pondWater.mesh.position.set(0.2, 0.07, -0.2);
+  islandGroup.add(_pondWater.mesh);
+  islandGroup.userData.waterTick = _pondWater.tick;
+  islandGroup.userData.waterSetNight = _pondWater.setNightMode;
 
   const ancientTree = makeObj(islandGroup, objects);
   m(ancientTree, G.cyl(0.35, 0.45, 1.8, 8), 0x5d4037, -2.2, 0.9, -1.8); 
@@ -162,8 +170,13 @@ export function buildWinterIsland(islandGroup) {
   m(cabin, G.box(0.2, 0.2, 0.4),          0xffd54f, -0.5, 2.3, -1.4); 
 
   const frozenLake = makeObj(islandGroup, objects);
-  m(frozenLake, G.cyl(1.4, 1.4, 0.05, 18), 0x90caf9, 1.0, 0.05, 1.2); 
+  m(frozenLake, G.cyl(1.4, 1.4, 0.05, 18), 0x90caf9, 1.0, 0.05, 1.2);
   m(frozenLake, G.sph(0.4),                0xffffff, -0.5, 0.1, 0.8);
+  // animated ice sheen on top
+  const _iceWater = createIce(1.35);
+  _iceWater.mesh.position.set(1.0, 0.08, 1.2);
+  islandGroup.add(_iceWater.mesh);
+  islandGroup.userData.waterTick = _iceWater.tick;
 
   const forest = makeObj(islandGroup, objects);
   const pinePos = [[-3.2, 0.5], [2.8, 1.8], [3.2, 1.0]];
