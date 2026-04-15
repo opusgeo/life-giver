@@ -67,42 +67,81 @@
       transform: translateX(-50%);
       display: flex;
       align-items: center;
-      gap: 20px;
-      background: rgba(255, 255, 255, 0.08);
+      gap: 16px;
+      background: rgba(10, 10, 20, 0.7);
       padding: 10px 24px;
-      border-radius: 40px;
-      backdrop-filter: blur(15px);
-       -webkit-backdrop-filter: blur(15px);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      z-index: 300;
-      pointer-events: auto;
+      border-radius: 30px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1.5px solid rgba(255, 255, 255, 0.15);
+      z-index: 1000;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
     }
     .tool-group {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
     }
     .divider {
-      width: 1px;
-      height: 20px;
+      width: 1.5px;
+      height: 24px;
       background: rgba(255, 255, 255, 0.15);
+      margin: 0 4px;
     }
     .icon-btn {
-      background: none;
-      border: none;
-      color: rgba(255, 255, 255, 0.6);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255, 255, 255, 0.8);
       cursor: pointer;
       display: flex;
       align-items: center;
+      justify-content: center;
       font-family: 'Georgia', serif;
-      font-size: 11px;
-      letter-spacing: 1px;
-      transition: all 0.3s ease;
-      padding: 4px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      transition: all 0.25s;
+      padding: 6px 14px;
+      border-radius: 15px;
       outline: none;
     }
-    .icon-btn:hover { color: white; }
-    .icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
+    .icon-btn:hover { 
+      background: rgba(255,255,255,0.15);
+      border-color: rgba(255,255,255,0.3);
+      color: white; 
+      transform: translateY(-2px);
+    }
+    .icon-btn:active { transform: translateY(0); }
+    
+    #next-btn {
+      background: rgba(255, 255, 255, 0.95);
+      border: none;
+      color: #011627;
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-family: 'Georgia', serif;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 1.5px;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 0 15px rgba(255,255,255,0.3);
+    }
+    #next-btn:hover { 
+      background: #fff; 
+      transform: scale(1.05) translateY(-2px);
+      box-shadow: 0 0 25px rgba(255,255,255,0.5);
+    }
+    #next-btn.ready {
+      animation: button-glow 2s infinite;
+      background: linear-gradient(135deg, #fff, #a8edea);
+      box-shadow: 0 0 20px rgba(168,237,234,0.6);
+    }
+    @keyframes button-glow {
+      0% { box-shadow: 0 0 10px rgba(168,237,234,0.4); transform: scale(1); }
+      50% { box-shadow: 0 0 30px rgba(168,237,234,0.8); transform: scale(1.05); }
+      100% { box-shadow: 0 0 10px rgba(168,237,234,0.4); transform: scale(1); }
+    }
 
     #blur-slider {
       -webkit-appearance: none;
@@ -124,28 +163,14 @@
       box-shadow: 0 0 10px rgba(255,255,255,0.3);
     }
 
-    #next-btn {
-      background: rgba(255, 255, 255, 0.15);
-      border: none;
-      color: white;
-      padding: 6px 16px;
-      border-radius: 20px;
-      font-family: 'Georgia', serif;
-      font-size: 10px;
-      letter-spacing: 1.5px;
-      cursor: pointer;
-      transition: all 0.3s;
-    }
-    #next-btn:hover { background: rgba(255, 255, 255, 0.25); }
-
     /* Conditional icons */
+    #camera-toggle.isometric { background: rgba(100, 180, 255, 0.25); color: #fff; border-color: rgba(100, 180, 255, 0.5); }
     #camera-toggle.isometric .mode-persp { display: none; }
     #camera-toggle:not(.isometric) .mode-iso { display: none; }
-    #music-toggle.muted span, #sfx-toggle.muted span { color: rgba(255,255,255,0.2); }
-    #music-toggle:not(.muted) span, #sfx-toggle:not(.muted) span { color: white; }
+    #music-toggle.muted span, #sfx-toggle.muted span { opacity: 0.3; }
+    #music-toggle:not(.muted) span, #sfx-toggle:not(.muted) span { opacity: 1; }
 
-    #theme-toggle:not(.night) .mode-night { display: none; }
-    #theme-toggle.night .mode-day { display: none; }
+    /* Removed theme-toggle rules */
 
     /* ── Tilt-Shift Blur ── */
     #tilt-shift-top, #tilt-shift-bottom {
@@ -184,9 +209,16 @@
     #flight-msg p, #completion-text {
       color: white;
       font-family: 'Georgia', serif;
-      font-size: 22px;
-      letter-spacing: 4px;
-      text-shadow: 0 0 20px rgba(168,237,234,0.6);
+      font-size: 32px;
+      font-weight: 900;
+      letter-spacing: 8px;
+      text-transform: uppercase;
+      text-shadow: 0 0 30px rgba(168,237,234,0.8), 0 0 60px rgba(168,237,234,0.4);
+      animation: float-text 3s ease-in-out infinite;
+    }
+    @keyframes float-text {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
     }
     /* --- MOBILE RESPONSIVE --- */
   @media (max-width: 768px) {
@@ -221,21 +253,76 @@
     header h1 { font-size: 14px !important; }
     #island-label { font-size: 10px !important; }
   }
+
+  /* ── Level Selector (Top) ── */
+  #level-selector {
+    position: fixed;
+    top: 65px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.65); /* More solid background */
+    padding: 8px 16px;
+    border-radius: 20px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    z-index: 1000;
+    pointer-events: auto;
+    max-width: 90vw;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  .level-item {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Georgia', serif;
+    font-size: 11px;
+    font-weight: 800;
+    color: rgba(255,255,255,0.85); /* Much higher contrast */
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .level-item:hover {
+    background: rgba(255,255,255,0.25);
+    color: #fff;
+    transform: translateY(-2px);
+    border-color: rgba(255,255,255,0.5);
+  }
+  .level-item.active {
+    background: #fff;
+    color: #011627;
+    border-color: #fff;
+    box-shadow: 0 0 15px rgba(255,255,255,0.6);
+    transform: scale(1.15);
+  }
 </style>
 </head>
 <body>
 
   <div id="hud">
-    <div id="island-label">✦ ORMAN KÖŞESİ 1/2</div>
+    <div id="island-label">✦ FARMHOUSE 1/6</div>
     <div id="progress-bar-container">
       <div id="progress-bar"></div>
     </div>
   </div>
 
+  <div id="level-selector">
+    <!-- Level dots injected by main.js -->
+  </div>
+
   <p id="hint">click to bring life &nbsp;✦&nbsp; drag to explore</p>
 
   <div id="flight-msg"><p>✦ &nbsp; travelling &nbsp; ✦</p></div>
-  <div id="completion-overlay"><p id="completion-text">✦ world awakened ✦</p></div>
+  <div id="completion-overlay"><p id="completion-text">✦ LEVEL COMPLETED ✦</p></div>
 
   <div id="tilt-shift-top"></div>
   <div id="tilt-shift-bottom"></div>
@@ -251,10 +338,15 @@
 
     <div class="divider"></div>
 
-    <button id="theme-toggle" class="icon-btn night" title="Toggle Theme">
-      <svg class="mode-day" viewBox="0 0 24 24"><path d="M12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,2L14.39,4.39L12,6.78L9.61,4.39L12,2M5.64,7.05L7.05,5.64L8.46,7.05L7.05,8.46L5.64,7.05M21,12L18.61,14.39L16.22,12L18.61,9.61L21,12M18.36,18.36L16.95,19.77L15.54,18.36L16.95,16.95L18.36,18.36M12,22L9.61,19.61L12,17.22L14.39,19.61L12,22M7.05,18.36L5.64,19.77L4.23,18.36L5.64,16.95L7.05,18.36M3,12L5.39,9.61L7.78,12L5.39,14.39L3,12M7.05,5.64L8.46,4.23L9.87,5.64L8.46,7.05L7.05,5.64Z" /></svg>
-      <svg class="mode-night" viewBox="0 0 24 24"><path d="M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36c-0.98,1.37-2.58,2.26-4.4,2.26 c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z" /></svg>
-    </button>
+    <select id="theme-select" class="icon-btn" title="Select Theme" style="-webkit-appearance: none; appearance: none; text-align: center; cursor: pointer; border-radius: 15px; background: rgba(255,255,255,0.06); outline: none;">
+      <option value="0" style="background: #011627; color: white;">🌅 MORNING</option>
+      <option value="1" style="background: #011627; color: white;">🌙 NIGHT</option>
+      <option value="2" style="background: #011627; color: white;">🌌 AURORA</option>
+      <option value="3" style="background: #011627; color: white;">🌇 SUNSET</option>
+      <option value="4" style="background: #011627; color: white;">🌃 MIDNIGHT</option>
+      <option value="5" style="background: #011627; color: white;">🌫️ FOGGY</option>
+      <option value="6" style="background: #011627; color: white;">🎬 CINEMATIC</option>
+    </select>
 
     <div class="divider"></div>
 
@@ -268,6 +360,16 @@
     <button id="camera-toggle" class="icon-btn" title="Switch Camera">
       <span class="mode-persp">📷 PERSP</span>
       <span class="mode-iso">📐 ISO</span>
+    </button>
+
+    <div class="divider"></div>
+
+    <button id="walk-mode-btn" class="icon-btn" title="Navigation Mode (Orbit / 1st Person / 3rd Person)">
+      <span id="walk-mode-label">🌐 ORBIT</span>
+    </button>
+
+    <button id="sync-btn" class="icon-btn" title="Sync with Blender (Hot-Reload)">
+      <span>🔄 SYNC</span>
     </button>
 
     <div class="divider"></div>

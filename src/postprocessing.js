@@ -118,7 +118,7 @@ export function resizeComposer(composer, w, h) {
 
 /**
  * Call when the active camera changes (e.g. PERSP ↔ ISO toggle).
- * BokehPass is automatically disabled for OrthographicCamera.
+ * BokehPass is supported for both Perspective and Orthographic cameras.
  *
  * @param {object}        passes      – { renderPass, bokehPass }
  * @param {THREE.Camera}  newCamera
@@ -127,7 +127,6 @@ export function resizeComposer(composer, w, h) {
 export function updateComposerCamera(passes, newCamera, dofEnabled) {
   passes.renderPass.camera = newCamera;
 
-  const isPersp = newCamera.isPerspectiveCamera;
   passes.bokehPass.camera  = newCamera;
-  passes.bokehPass.enabled = dofEnabled && isPersp;
+  passes.bokehPass.enabled = dofEnabled;
 }

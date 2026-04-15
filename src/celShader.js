@@ -16,7 +16,7 @@ export const CEL_DEFAULTS = {
 export const PBR_DEFAULTS = {
   enabled:       true,
   roughnessMult: 1.0,   // 0.0 – 2.0
-  metalnessMult: 1.0,   // 0.0 – 2.0
+  metalnessMult: 0.0,   // 0.0 – 2.0
   emissiveAdd:   0.0,   // 0.0 – 1.0
   colorTint:     '#ffffff',
   tintStrength:  0.0,   // 0.0 – 1.0
@@ -95,7 +95,7 @@ function findInteractableAncestor(node) {
  */
 export function applyPBR(islandGroup, pbrParams) {
   islandGroup.traverse(node => {
-    if (!node.isMesh || node.userData[OUTLINE_TAG]) return;
+    if (!node.isMesh || node.userData[OUTLINE_TAG] || hasCustomMat(node)) return;
 
     const ancestor = findInteractableAncestor(node);
     const isAlive  = ancestor?.userData?.isAlive ?? false;
@@ -142,6 +142,7 @@ export function applyPBR(islandGroup, pbrParams) {
         }
       }
       orig.needsUpdate = true;
+      orig.side = THREE.DoubleSide;
     });
 
     // Ensure mesh is showing original material (not clay or toon)
@@ -155,36 +156,61 @@ export function applyPBR(islandGroup, pbrParams) {
  * - isAlive=false meshes always stay as clay (unchanged by this call).
  * - isAlive=true meshes: cel ON → toon; cel OFF → original PBR.
  */
+// Tags that indicate a mesh has a custom-managed material — cel/PBR must not override these.
+const CUSTOM_MAT_TAGS = ['__vol_light__', '__glass__', '__water__', '__fire__'];
+function hasCustomMat(node) {
+  return CUSTOM_MAT_TAGS.some(t => node.userData[t]);
+}
+
 export function applyCel(islandGroup, celParams, pbrParams, clayMatFn) {
   removeOutlines(islandGroup);
   const gradMap = makeGradMap(celParams.steps);
 
   islandGroup.traverse(node => {
-    if (!node.isMesh || node.userData[OUTLINE_TAG]) return;
+    if (!node.isMesh || node.userData[OUTLINE_TAG] || hasCustomMat(node)) return;
 
     const ancestor = findInteractableAncestor(node);
     const isAlive  = ancestor?.userData?.isAlive ?? false;
 
     if (!isAlive) {
-      // Dead / unclicked — always clay, never touched by shader toggle
+      // Dead / unclicked — always pure clay (grey).
       node.material = clayMatFn();
       return;
     }
 
     if (celParams.enabled) {
       // ── Toon material ────────────────────────────────────────────────────────
-      let baseColor = 0xcccccc;
-      if (celParams.useOriginalColors && node.userData.originalMaterial) {
-        const orig = Array.isArray(node.userData.originalMaterial)
-          ? node.userData.originalMaterial[0]
-          : node.userData.originalMaterial;
-        const col = orig?.userData?._baseColor
-          ? new THREE.Color(orig.userData._baseColor)
-          : orig?.color;
-        if (col) baseColor = col.getHex();
+      const processMat = (orig) => {
+        let baseColor = 0xcccccc;
+        let hasVertexColors = !!orig?.vertexColors;
+
+        if (celParams.useOriginalColors && orig) {
+          const col = orig?.userData?._baseColor
+            ? new THREE.Color(orig.userData._baseColor)
+            : orig?.color;
+          if (col) baseColor = col.getHex();
+        }
+
+        const finalColor = hasVertexColors ? 0xffffff : baseColor;
+        const color = adjustColor(finalColor, celParams.brightness, celParams.saturation);
+        
+        const toon = new THREE.MeshToonMaterial({ 
+          color, 
+          gradientMap: gradMap,
+          vertexColors: hasVertexColors,
+          side: THREE.DoubleSide
+        });
+        // Copy map if exists (for ground items etc)
+        if (orig?.map) toon.map = orig.map;
+        return toon;
+      };
+
+      if (Array.isArray(node.userData.originalMaterial)) {
+        node.material = node.userData.originalMaterial.map(processMat);
+      } else {
+        node.material = processMat(node.userData.originalMaterial);
       }
-      const color = adjustColor(baseColor, celParams.brightness, celParams.saturation);
-      node.material = new THREE.MeshToonMaterial({ color, gradientMap: gradMap });
+      
       if (celParams.outlineEnabled) addOutline(node, celParams.outlineThickness, celParams.outlineColor);
     } else {
       // ── Restore original PBR ─────────────────────────────────────────────────
